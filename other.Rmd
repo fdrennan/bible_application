@@ -1,0 +1,232 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+
+```{r}
+newBible = readRDS("newBible.rda")
+
+library(tidytext)
+library(tidyverse)
+library(ggthemes)
+
+versions = c('kjb',  'asv', 'drb',  'erv',  'wbt',  'web',  'ylt',  'akjv', 'wnt')
+
+newBible$text = as.character(newBible$text)
+
+the_bible = newBible %>%
+  unnest_tokens(word, text)
+```
+
+
+```{r}
+data(stop_words)
+
+new_stop_words = rbind(
+  stop_words,
+  tibble(
+    word    = c('thy',
+                'thee',
+                'ye',
+                'thou',
+                'hath'),
+    lexicon = rep('other', length(word))
+  )
+)
+
+the_bible %>%
+  anti_join(new_stop_words) %>% 
+  count(word, sort = TRUE) %>%
+  filter(n > 10000) %>%
+  mutate(word = reorder(word, n)) %>%
+          ggplot(aes(word, n)) +
+          geom_col() +
+          xlab(NULL) +
+          coord_flip()  +
+          theme_solarized(light = TRUE) +
+          ggtitle("Unique Word Frequency") +
+          xlab("Frequency") +
+          ylab("Count") +
+          theme(axis.text.y = element_text(angle = 40, hjust = 1),
+                text = element_text(size = 10))
+```
+
+
+```{r}
+
+bibleSentiment = the_bible %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(bookName, index = chapter, sentiment) %>%
+  spread(sentiment, n, fill = 0) %>%
+  mutate(sentiment = positive - negative) %>% 
+  mutate(
+    direction = case_when(
+      sentiment >= 0    ~ 'Positive',
+      TRUE              ~ 'Negative'
+    )
+  )
+
+
+
+ggplot(bibleSentiment, aes(reorder(bookName, sentiment, FUN = mean), sentiment)) +
+  geom_col() +
+  xlab(NULL) +
+          coord_flip()  +
+          theme_solarized(light = TRUE) +
+          ggtitle("Unique Word Frequency") +
+          xlab("Frequency") +
+          ylab("Count") +
+          theme(axis.text.y = element_text(angle = 40, hjust = 1),
+                text = element_text(size = 7))
+
+bibleSentiment %>% 
+  arrange(-negative)
+
+```
+
+
+```{r,fig.height=10, fig.width=10}
+
+gg=ggplot(bibleSentiment %>% 
+         filter(bookName %in% c("Matthew", 
+                                "Mark", 
+                                "Psalm", 
+                                "Genesis",
+                                "Exodus",
+                                "Joshua",
+                                "Revelation")), 
+       aes(index, sentiment, fill = direction, colour = direction)) +
+  geom_col(show.legend = FALSE) +
+  # geom_text(aes(label=direction), vjust=0)
+  geom_bar(stat="identity", 
+              position="identity", 
+              colour="black", 
+              size = 0.5) +
+  facet_wrap(~bookName, ncol = 2, scales = "free_x")
+plotly::ggplotly(gg)
+
+```
+
+
+```{r}
+
+
+library(wordcloud)
+
+stopUnnest %>%
+  count(word) %>%
+  with(wordcloud(word, n, max.words = 100))
+
+library(reshape2)
+
+stopUnnest %>%
+  inner_join(get_sentiments("bing")) %>%
+  filter(bookName == "Matthew") %>% 
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#F8766D", "#00BFC4"),
+                   max.words = 50)
+```
+
+
+```{r}
+
+book_words <- stopUnnest %>%
+  count(bookName, word, sort = TRUE) %>%
+  ungroup()
+
+total_words <- book_words %>% 
+  group_by(bookName) %>% 
+  summarize(total = sum(n))
+
+book_words <- left_join(book_words, total_words)
+
+
+
+
+freq_by_rank <- book_words %>% 
+  group_by(bookName) %>% 
+  mutate(rank = row_number(), 
+         `term frequency` = n/total)
+
+freq_by_rank
+
+ggplot(book_words %>% 
+         filter(bookName == c("Genesis",
+                              "Matthew",
+                              "Exodus",
+                              "Leviticus")), aes(n/total, fill = bookName)) +
+  geom_histogram(show.legend = FALSE) +
+  xlim(NA, 0.0009) +
+  facet_wrap(~bookName, ncol = 2, scales = "free_y")
+```
+
+
+```{r}
+freq_by_rank <- book_words %>% 
+  group_by(bookName) %>% 
+  mutate(rank = row_number(), 
+         `term frequency` = n/total)
+
+freq_by_rank
+
+
+
+freq_by_rank %>% 
+  ggplot(aes(rank, `term frequency`, color = bookName)) + 
+  geom_line(size = 1.2, alpha = 0.8) + 
+  scale_x_log10() +
+  scale_y_log10()
+
+
+
+rank_subset <- freq_by_rank %>% 
+  filter(rank < 500,
+         rank > 10)
+
+lm(log10(`term frequency`) ~ log10(rank), data = rank_subset)
+
+
+freq_by_rank %>% 
+  ggplot(aes(rank, `term frequency`, color = bookName)) + 
+  geom_abline(intercept = -0.62, slope = -1.1, color = "gray50", linetype = 2) +
+  geom_line(size = 1.2, alpha = 0.8) + 
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+
+```{r}
+library(magrittr)
+
+the_bible %>% 
+  count(bookName, word, sort = TRUE) %>% 
+  anti_join(new_stop_words) %>% 
+  bind_tf_idf(word, bookName, n) %>% 
+  arrange(desc(tf_idf)) %>% 
+  mutate(
+    word = factor(word, levels = rev(unique(word))),
+    bookName = tolower(bookName)
+  ) %>% 
+  filter(bookName!=word,
+         word %>% is_in(bookName) %>% not,
+         bookName %>% is_in(word) %>% not) %>% 
+  group_by(bookName) %>% 
+  top_n(15, tf_idf) %>% 
+  ungroup %>% 
+  mutate(word = reorder(word, tf_idf)) %>% 
+  ggplot(aes(word, tf_idf, fill = bookName)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = NULL, y = 'tf_idf') +
+  facet_wrap(~bookName, ncol = 2, scales = 'free') +
+  coord_flip()
+```
+
+
+
+```{r}
+
+```

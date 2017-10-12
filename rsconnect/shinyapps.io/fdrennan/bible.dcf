@@ -1,0 +1,13 @@
+name: bible
+title: bible
+username:
+account: fdrennan
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 216288
+bundleId: 988667
+url: https://fdrennan.shinyapps.io/bible/
+when: 1505868009.23539
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: unnested.rda
